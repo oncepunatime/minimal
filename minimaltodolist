@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ระบบสะสมแต้มกิจกรรมนิสิต (Student Point System)</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- React & React DOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for TSX/JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Sarabun', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // --- Mock Data & LocalStorage Backend Layer (ทำงานสมบูรณ์โดยไม่ต้องตั้งค่า Server เพิ่มเติม) ---
+    const INITIAL_MISSIONS = [
+      { id: 'M-01', title: 'แยกขยะก่อนทิ้งที่โรงอาหาร', description: 'ถ่ายรูปคู่กับถังขยะแยกประเภท ณ โรงอาหารกลาง', points: 10, requireProof: true },
+      { id: 'M-02', title: 'นำขวดน้ำ/แก้วน้ำส่วนตัวมาใช้', description: 'ถ่ายรูปแก้วน้ำส่วนตัวที่ใช้ซื้อเครื่องดื่มในมหาวิทยาลัย', points: 5, requireProof: true },
+      { id: 'M-03', title: 'เข้าร่วมกิจกรรมเสวนาสิ่งแวดล้อม', description: 'เช็คอินเข้าร่วมกิจกรรม ณ หอประชุมใหญ่', points: 20, requireProof: false },
+      { id: 'M-04', title: 'ตอบแบบสอบถามประเมินโครงการ', description: 'กรอกแบบสอบถามความคิดเห็นออนไลน์', points: 15, requireProof: false }
+    ];
+
+    const INITIAL_REWARDS = [
+      { id: 'R-01', name: 'คูปองส่วนลดร้านกาแฟ 20 บาท', pointsRequired: 20, stock: 50 },
+      { id: 'R-02', name: 'กระเป๋าผ้าลดโลกเล็กลายลิขสิทธิ์', pointsRequired: 50, stock: 15 },
+      { id: 'R-03', name: 'แก้วน้ำเก็บความเย็น Green Campus', pointsRequired: 80, stock: 10 }
+    ];
+
+    function App() {
+      const [view, setView] = useState('login'); // 'login' | 'student' | 'admin'
+      const [studentId, setStudentId] = useState('');
+      const [studentName, setStudentName] = useState('');
+      const [points, setPoints] = useState(0);
+      const [activeTab, setActiveTab] = useState('missions');
+      
+      const [missions, setMissions] = useState(INITIAL_MISSIONS);
+      const [rewards, setRewards] = useState(INITIAL_REWARDS);
+      const [submissions, setSubmissions] = useState([]);
+      const [redemptions, setRedemptions] = useState([]);
+
+      // Modal State
+      const [selectedMission, setSelectedMission] = useState(null);
+      const [proofFile, setProofFile] = useState(null);
+      const [isSubmitting, setIsSubmitting] = useState(false);
+
+      // โหลดข้อมูลจาก LocalStorage
+      useEffect(() => {
+        const savedSubmissions = JSON.parse(localStorage.getItem('app_submissions') || '[]');
+        const savedRedemptions = JSON.parse(localStorage.getItem('app_redemptions') || '[]');
+        const savedPoints = localStorage.getItem(`points_${studentId}`);
+        
+        setSubmissions(savedSubmissions);
+        setRedemptions(savedRedemptions);
+        if (savedPoints !== null) {
+          setPoints(parseInt(savedPoints, 10));
+        }
+      }, [studentId]);
+
+      // ตรวจสอบ URL Parameter หากสแกน QR Code มา
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const qrStudentId = params.get('student_id');
+        const qrMissionId = params.get('mission_id');
+        if (qrStudentId) {
+          handleLogin(qrStudentId);
+        }
+        if (qrMissionId) {
+          const m = INITIAL_MISSIONS.find(x => x.id === qrMissionId);
+          if (m) setSelectedMission(m);
+        }
+      }, []);
+
+      const handleLogin = (id) => {
+        if (!id.trim()) return;
+        setStudentId(id);
+        setStudentName(`นิสิต ${id}`);
+        const savedPoints = localStorage.getItem(`points_${id}`);
+        setPoints(savedPoints ? parseInt(savedPoints, 10) : 0);
+        setView('student');
+      };
+
+      const handleMissionSubmit = (e) => {
+        e.preventDefault();
+        if (!selectedMission) return;
+
+        setIsSubmitting(true);
+        setTimeout(() => {
+          const newStatus = selectedMission.requireProof ? 'PENDING' : 'APPROVED';
+          const pointsEarned = selectedMission.points;
+
+          const newSub = {
+            id: 'SUB-' + Date.now(),
+            studentId,
+            studentName,
+            missionTitle: selectedMission.title,
+            points: pointsEarned,
+            status: newStatus,
+            timestamp: new Date().toLocaleString('th-TH'),
+            proofName: proofFile ? proofFile.name : 'ไม่มีหลักฐาน'
+          };
+
+          const updatedSubmissions = [newSub, ...submissions];
+          setSubmissions(updatedSubmissions);
+          localStorage.setItem('app_submissions', JSON.stringify(updatedSubmissions));
+
+          if (newStatus === 'APPROVED') {
+            const newTotal = points + pointsEarned;
+            setPoints(newTotal);
+            localStorage.setItem(`points_${studentId}`, newTotal.toString());
+            alert(`ทำภารกิจสำเร็จ! ได้รับ ${pointsEarned} คะแนน`);
+          } else {
+            alert('ส่งภารกิจและหลักฐานเรียบร้อยแล้ว! อยู่ระหว่างการรอผู้จัดงานอนุมัติคะแนน');
+          }
+
+          setIsSubmitting(false);
+          setSelectedMission(null);
+          setProofFile(null);
+        }, 600);
+      };
+
+      const handleRedeem = (reward) => {
+        if (points < reward.pointsRequired) {
+          alert('คะแนนสะสมของคุณไม่เพียงพอสำหรับการแลกรางวัลนี้');
+          return;
+        }
+
+        if (confirm(`ยืนยันการใช้ ${reward.pointsRequired} คะแนน เพื่อแลกรับ "${reward.name}"?`)) {
+          const newTotal = points - reward.pointsRequired;
+          setPoints(newTotal);
+          localStorage.setItem(`points_${studentId}`, newTotal.toString());
+
+          const newRedeem = {
+            id: 'RED-' + Date.now(),
+            studentId,
+            rewardName: reward.name,
+            pointsUsed: reward.pointsRequired,
+            timestamp: new Date().toLocaleString('th-TH')
+          };
+
+          const updatedRedemptions = [newRedeem, ...redemptions];
+          setRedemptions(updatedRedemptions);
+          localStorage.setItem('app_redemptions', JSON.stringify(updatedRedemptions));
+
+          alert('แลกรับรางวัลสำเร็จ! กรุณานำหลักฐานไปรับของรางวัลกับผู้จัดโครงการ');
+        }
+      };
+
+      const handleApproveSubmission = (subId, pointsEarned, targetStudentId) => {
+        const updatedSubmissions = submissions.map(s => {
+          if (s.id === subId) return { ...s, status: 'APPROVED' };
+          return s;
+        });
+        setSubmissions(updatedSubmissions);
+        localStorage.setItem('app_submissions', JSON.stringify(updatedSubmissions));
+
+        const targetCurrentPoints = parseInt(localStorage.getItem(`points_${targetStudentId}`) || '0', 10);
+        const newTotal = targetCurrentPoints + pointsEarned;
+        localStorage.setItem(`points_${targetStudentId}`, newTotal.toString());
+
+        if (targetStudentId === studentId) {
+          setPoints(newTotal);
+        }
+        alert('อนุมัติภารกิจและมอบคะแนนเรียบร้อยแล้ว');
+      };
+
+      return (
+        <div className="max-w-md mx-auto md:max-w-4xl p-4">
+          <!-- Top Navigation Header -->
+          <header className="flex justify-between items-center py-4 mb-6 border-b border-slate-200">
+            <div className="flex items-center gap-2">
+              <div className="bg-emerald-600 text-white p-2 rounded-xl font-black text-lg">GP</div>
+              <div>
+                <h1 className="font-bold text-slate-800 leading-tight">Green Point System</h1>
+                <p className="text-xs text-slate-500">ระบบสะสมแต้มภารกิจนิสิต</p>
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              {view !== 'login' && (
+                <button 
+                  onClick={() => setView('login')}
+                  className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg font-medium transition"
+                >
+                  สลับผู้ใช้
+                </button>
+              )}
+              <button 
+                onClick={() => setView(view === 'admin' ? 'login' : 'admin')}
+                className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg font-medium transition"
+              >
+                {view === 'admin' ? 'หน้าแรก' : 'ผู้ดูแลระบบ'}
+              </button>
+            </div>
+          </header>
+
+          <!-- View 1: Login / QR Entry -->
+          {view === 'login' && (
+            <div className="max-w-md mx-auto my-8 bg-white p-6 rounded-3xl shadow-xl border border-slate-100 text-center space-y-6">
+              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+              </div>
+              
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800">เข้าสู่ระบบสะสมแต้ม</h2>
+                <p className="text-sm text-slate-500 mt-1">กรอกรหัสนิสิตเพื่อสะสมคะแนนและแลกรางวัล</p>
+              </div>
+
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="กรอกรหัสนิสิต (เช่น 66100000)"
+                  value={studentId}
+                  onChange={(e) => setStudentId(e.target.value)}
+                  className="w-full text-center text-lg font-bold tracking-wider px-4 py-3.5 rounded-2xl border-2 border-slate-200 focus:border-emerald-500 focus:outline-none transition"
+                />
+                <button
+                  onClick={() => handleLogin(studentId)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-emerald-200 transition"
+                >
+                  เข้าสู่ระบบ
+                </button>
+              </div>
+
+              <div className="border-t border-slate-100 pt-4 text-xs text-slate-400">
+                หรือ สแกน QR Code ประจำจุดกิจกรรมเพื่อเข้าสู่หน้าทำภารกิจโดยตรง
+              </div>
+            </div>
+          )}
+
+          <!-- View 2: Student Main Dashboard -->
+          {view === 'student' && (
+            <div className="space-y-6">
+              <!-- Profile & Points Card -->
+              <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-3xl p-6 text-white shadow-xl flex justify-between items-center">
+                <div>
+                  <p className="text-emerald-100 text-xs font-semibold uppercase tracking-wider">บัญชีนิสิต</p>
+                  <h2 className="text-xl font-bold">{studentName}</h2>
+                  <p className="text-xs text-emerald-200 mt-0.5">รหัสประจำตัว: {studentId}</p>
+                </div>
+                <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 text-right">
+                  <p className="text-[10px] text-emerald-100 font-medium">คะแนนสะสมทั้งหมด</p>
+                  <div className="text-3xl font-black text-amber-300">{points} <span className="text-xs font-normal text-white">แต้ม</span></div>
+                </div>
+              </div>
+
+              <!-- Tabs -->
+              <div className="flex bg-slate-200 p-1.5 rounded-2xl gap-1 text-sm font-semibold text-slate-600">
+                <button
+                  onClick={() => setActiveTab('missions')}
+                  className={`flex-1 py-2.5 rounded-xl transition ${activeTab === 'missions' ? 'bg-white text-emerald-700 shadow-sm' : ''}`}
+                >
+                  ภารกิจสะสมแต้ม
+                </button>
+                <button
+                  onClick={() => setActiveTab('rewards')}
+                  className={`flex-1 py-2.5 rounded-xl transition ${activeTab === 'rewards' ? 'bg-white text-emerald-700 shadow-sm' : ''}`}
+                >
+                  แลกรางวัล
+                </button>
+                <button
+                  onClick={() => setActiveTab('history')}
+                  className={`flex-1 py-2.5 rounded-xl transition ${activeTab === 'history' ? 'bg-white text-emerald-700 shadow-sm' : ''}`}
+                >
+                  ประวัติ
+                </button>
+              </div>
+
+              <!-- Tab Content 1: Missions -->
+              {activeTab === 'missions' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {missions.map((m) => (
+                    <div key={m.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between hover:shadow-md transition">
+                      <div>
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">{m.id}</span>
+                          <span className="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full">+{m.points} แต้ม</span>
+                        </div>
+                        <h3 className="font-bold text-slate-800 text-base">{m.title}</h3>
+                        <p className="text-xs text-slate-500 mt-1 mb-4">{m.description}</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedMission(m)}
+                        className="w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-xl transition"
+                      >
+                        ทำภารกิจนี้
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <!-- Tab Content 2: Rewards -->
+              {activeTab === 'rewards' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {rewards.map((r) => (
+                    <div key={r.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-sm">{r.name}</h3>
+                        <p className="text-xs text-emerald-600 font-bold mt-1">ใช้ {r.pointsRequired} แต้ม</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">คงเหลือ {r.stock} ชิ้น</p>
+                      </div>
+                      <button
+                        onClick={() => handleRedeem(r)}
+                        disabled={points < r.pointsRequired}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+                          points >= r.pointsRequired
+                            ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-200'
+                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        แลกรับ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <!-- Tab Content 3: History -->
+              {activeTab === 'history' && (
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-100">
+                  <div className="p-4 bg-slate-50 rounded-t-2xl font-bold text-xs text-slate-500">ประวัติการทำภารกิจ</div>
+                  {submissions.filter(s => s.studentId === studentId).length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-400">ยังไม่มีประวัติการส่งภารกิจ</div>
+                  ) : (
+                    submissions.filter(s => s.studentId === studentId).map((s) => (
+                      <div key={s.id} className="p-4 flex justify-between items-center text-xs">
+                        <div>
+                          <p className="font-bold text-slate-800">{s.missionTitle}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{s.timestamp}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className={`inline-block px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                            s.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {s.status === 'APPROVED' ? 'สำเร็จ (+'+s.points+')' : 'รอตรวจสอบ'}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <!-- View 3: Admin / Organizer Dashboard -->
+          {view === 'admin' && (
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                <h2 className="text-lg font-bold text-slate-800 mb-1">แดชบอร์ดผู้จัดงาน (Admin Panel)</h2>
+                <p className="text-xs text-slate-500 mb-6">สรุปสถิติการเข้าร่วมกิจกรรมและตรวจสอบการส่งภารกิจ</p>
+
+                <!-- Key Metrics Cards -->
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-semibold text-slate-400">นิสิตเข้าร่วมทั้งหมด</p>
+                    <p className="text-2xl font-black text-slate-800 mt-1">
+                      {new Set(submissions.map(s => s.studentId)).size} <span className="text-xs font-normal text-slate-500">คน</span>
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-semibold text-slate-400">ภารกิจถูกส่งทั้งหมด</p>
+                    <p className="text-2xl font-black text-emerald-600 mt-1">
+                      {submissions.length} <span className="text-xs font-normal text-slate-500">ครั้ง</span>
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 col-span-2 md:col-span-1">
+                    <p className="text-[10px] font-semibold text-slate-400">การแลกรางวัลรวม</p>
+                    <p className="text-2xl font-black text-indigo-600 mt-1">
+                      {redemptions.length} <span className="text-xs font-normal text-slate-500">รายการ</span>
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Action Table: Pending Submissions -->
+                <div className="space-y-3">
+                  <h3 className="font-bold text-sm text-slate-800">รายการรออนุมัติภารกิจ</h3>
+                  <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden divide-y divide-slate-100">
+                    {submissions.filter(s => s.status === 'PENDING').length === 0 ? (
+                      <div className="p-6 text-center text-xs text-slate-400">ไม่มีรายการรออนุมัติ</div>
+                    ) : (
+                      submissions.filter(s => s.status === 'PENDING').map((s) => (
+                        <div key={s.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                          <div>
+                            <div className="font-bold text-slate-800">{s.studentName} ({s.studentId})</div>
+                            <div className="text-slate-500 mt-0.5">ภารกิจ: {s.missionTitle} (+{s.points} แต้ม)</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">หลักฐาน: {s.proofName}</div>
+                          </div>
+                          <button
+                            onClick={() => handleApproveSubmission(s.id, s.points, s.studentId)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition self-start md:self-auto shadow-sm"
+                          >
+                            อนุมัติคะแนน
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <!-- Modal: Submission & Evidence Form -->
+          {selectedMission && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-100">
+                <h3 className="font-bold text-slate-800 text-base">ยืนยันการส่งภารกิจ</h3>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <p className="font-bold text-xs text-slate-700">{selectedMission.title}</p>
+                  <p className="text-[10px] text-amber-700 font-semibold mt-1">ได้รับ +{selectedMission.points} แต้ม</p>
+                </div>
+
+                {selectedMission.requireProof && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-600 block">แนบไฟล์รูปถ่าย/หลักฐาน</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setProofFile(e.target.files[0] || null)}
+                      className="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                    />
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setSelectedMission(null)}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={handleMissionSubmit}
+                    disabled={isSubmitting}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-200 transition"
+                  >
+                    {isSubmitting ? 'กำลังส่ง...' : 'ยืนยันส่งภารกิจ'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
